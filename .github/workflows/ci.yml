@@ -21,25 +21,39 @@ jobs:
     - name: Build with Maven
       run: mvn clean package -DskipTests
 
+
   security-check:
     runs-on: self-hosted
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Trivy Installation
+    # --- Trivy ---
+    - name: Install Trivy (Caching Enabled)
       run: |
-        sudo apt-get install wget gnupg
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-        echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-        sudo apt-get update -y
-        sudo apt-get install trivy -y
+        if ! command -v trivy &> /dev/null; then
+          echo "Installing Trivy..."
+          sudo apt-get update -y
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.49.1_Linux-64bit.deb -O trivy.deb
+          sudo dpkg -i trivy.deb
+        else
+          echo "Trivy already installed, skipping."
+        fi
 
-    - name: Trivy Fs Scan 
-      run: trivy fs --format table -o fs-report.json .
+    - name: Trivy FS Scan (Fast)
+      run: trivy fs --scanners vuln,secret --format json -o fs-report.json .
 
-    - name: Gitleaks installation 
-      run: sudo apt install gitleaks -y
+    # --- GitLeaks ---
+    - name: Install GitLeaks (Caching Enabled)
+      run: |
+        if ! command -v gitleaks &> /dev/null; then
+          echo "Installing GitLeaks..."
+          wget https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -O gitleaks
+          sudo install -m 755 gitleaks /usr/local/bin/gitleaks
+        else
+          echo "GitLeaks already installed, skipping."
+        fi
 
-    - name: Gitleaks Code Scan
-      run: gitleaks detect source . -r gitleaks-report.json -f json
+    - name: GitLeaks Code Scan
+      run: gitleaks detect -r gitleaks-report.json -f json
