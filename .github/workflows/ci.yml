@@ -1,6 +1,8 @@
 name: Java CI with Maven
 
-# Only the latest commit in the branch runs
+# ======================================
+# 🔥 Concurrency (only latest commit runs)
+# ======================================
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -38,14 +40,16 @@ jobs:
           name: app-jar
           path: target/*.jar
 
+
+
   # =====================
-  # 2️⃣ TEST JOB (Runs after Build)
+  # 2️⃣ TEST JOB
   # =====================
   test:
     name: Test
     runs-on: self-hosted
     needs: build
-
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,8 +64,10 @@ jobs:
       - name: Run Tests
         run: mvn -B test
 
+
+
   # =====================
-  # 3️⃣ SONARQUBE SCAN (Runs after Test)
+  # 3️⃣ SONARQUBE SCAN
   # =====================
   sonar:
     name: SonarQube Scan
@@ -86,12 +92,6 @@ jobs:
       - name: Build for Sonar
         run: mvn -B clean package
 
-      - name: Upload JAR artifact (for downstream jobs)
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-jar
-          path: target/*.jar
-
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v6.0.0
         env:
@@ -104,9 +104,11 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-  # =====================
-  # 4️⃣ BUILD DOCKER IMAGE & PUSH (Runs after Sonar)
-  # =====================
+
+
+  # =============================
+  # 4️⃣ BUILD + PUSH DOCKER IMAGE
+  # =============================
   build_docker_image_and_push:
     name: Build and Push Docker Image
     runs-on: self-hosted
@@ -134,16 +136,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push (multi-platform optional)
+      - name: Build and Push Image
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./Dockerfile
           push: true
           tags: ${{ vars.DOCKERHUB_USERNAME }}/boardgame:latest
-          file: ./Dockerfile
+
+
 
   # =====================
-  # 5️⃣ SECURITY CHECK (Runs after Sonar)
+  # 5️⃣ SECURITY CHECKS
   # =====================
   security-check:
     name: Security Scans
@@ -155,49 +159,44 @@ jobs:
         uses: actions/checkout@v4
 
       # ---- TRIVY ----
-      - name: Install Trivy (if not present)
+      - name: Install Trivy if not installed
         run: |
           if ! command -v trivy &> /dev/null; then
-            echo "Installing Trivy..."
             sudo apt-get update -y
             sudo apt-get install -y wget
             wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.49.1_Linux-64bit.deb -O trivy.deb
             sudo dpkg -i trivy.deb
           else
-            echo "Trivy already installed — skipping."
+            echo "Trivy already installed"
           fi
 
       - name: Trivy FS Scan
         run: trivy fs --scanners vuln,secret --format json -o fs-report.json .
 
-      - name: Upload Trivy report
+      - name: Upload Trivy Report
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: fs-report.json
 
       # ---- GITLEAKS ----
-      - name: Install Gitleaks (if not present)
+      - name: Install GitLeaks if not installed
         run: |
           if ! command -v gitleaks &> /dev/null; then
-            echo "Installing Gitleaks..."
             LATEST_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
-              | grep browser_download_url \
-              | grep linux_x64 \
-              | cut -d '"' -f 4)
-            echo "Downloading from: $LATEST_URL"
+              | grep browser_download_url | grep linux_x64 | cut -d '"' -f 4)
             wget -O gitleaks.tar.gz "$LATEST_URL"
             tar -xzf gitleaks.tar.gz
             sudo install -m 755 gitleaks /usr/local/bin/gitleaks
           else
-            echo "Gitleaks already installed — skipping."
+            echo "GitLeaks already installed"
           fi
 
       - name: GitLeaks Scan
         run: |
           gitleaks detect -r gitleaks-report.json -f json || true
 
-      - name: Upload GitLeaks report
+      - name: Upload GitLeaks Report
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
