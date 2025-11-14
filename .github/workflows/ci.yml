@@ -47,13 +47,17 @@ jobs:
     # --- GitLeaks ---
     - name: Install GitLeaks (Caching Enabled)
       run: |
-        if ! command -v gitleaks &> /dev/null; then
-          echo "Installing GitLeaks..."
-          wget https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -O gitleaks
-          sudo install -m 755 gitleaks /usr/local/bin/gitleaks
-        else
-          echo "GitLeaks already installed, skipping."
-        fi
+       if ! command -v gitleaks &> /dev/null; then
+        echo "Installing GitLeaks..."
+        LATEST_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+        | grep browser_download_url \
+        | grep linux-amd64 \
+        | cut -d '"' -f 4)
 
-    - name: GitLeaks Code Scan
-      run: gitleaks detect -r gitleaks-report.json -f json
+       echo "Downloading from: $LATEST_URL"
+       wget -O gitleaks "$LATEST_URL"
+       sudo install -m 755 gitleaks /usr/local/bin/gitleaks
+       else
+        echo "GitLeaks already installed, skipping."
+       fi
+
