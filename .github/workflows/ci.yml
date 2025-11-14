@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
 
 jobs:
+
   build:
     runs-on: self-hosted
 
@@ -22,13 +23,17 @@ jobs:
       run: mvn clean package -DskipTests
 
 
+
   security-check:
     runs-on: self-hosted
 
     steps:
     - uses: actions/checkout@v4
 
-    # --- Trivy ---
+
+    # ============================
+    #        TRIVY SETUP
+    # ============================
     - name: Install Trivy (Caching Enabled)
       run: |
         if ! command -v trivy &> /dev/null; then
@@ -38,26 +43,34 @@ jobs:
           wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.49.1_Linux-64bit.deb -O trivy.deb
           sudo dpkg -i trivy.deb
         else
-          echo "Trivy already installed, skipping."
+          echo "Trivy already installed — skipping."
         fi
 
     - name: Trivy FS Scan (Fast)
       run: trivy fs --scanners vuln,secret --format json -o fs-report.json .
 
-    # --- GitLeaks ---
+
+    # ============================
+    #        GITLEAKS SETUP
+    # ============================
     - name: Install GitLeaks (Caching Enabled)
       run: |
-       if ! command -v gitleaks &> /dev/null; then
-        echo "Installing GitLeaks..."
-        LATEST_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
-        | grep browser_download_url \
-        | grep linux-amd64 \
-        | cut -d '"' -f 4)
+        if ! command -v gitleaks &> /dev/null; then
+          echo "Installing GitLeaks..."
 
-       echo "Downloading from: $LATEST_URL"
-       wget -O gitleaks "$LATEST_URL"
-       sudo install -m 755 gitleaks /usr/local/bin/gitleaks
-       else
-        echo "GitLeaks already installed, skipping."
-       fi
+          LATEST_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+            | grep browser_download_url \
+            | grep linux_x64 \
+            | cut -d '"' -f 4)
 
+          echo "Downloading from: $LATEST_URL"
+          wget -O gitleaks.tar.gz "$LATEST_URL"
+
+          tar -xzf gitleaks.tar.gz
+          sudo install -m 755 gitleaks /usr/local/bin/gitleaks
+        else
+          echo "GitLeaks already installed — skipping."
+        fi
+
+    - name: GitLeaks Code Scan
+      run: gitleaks detect -r gitleaks-report.json -f json
