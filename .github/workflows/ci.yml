@@ -6,6 +6,9 @@ on:
 
 jobs:
 
+  # =====================
+  #  BUILD JOB
+  # =====================
   build:
     runs-on: self-hosted
 
@@ -24,16 +27,16 @@ jobs:
 
 
 
+  # =====================
+  #  SECURITY CHECK JOB
+  # =====================
   security-check:
     runs-on: self-hosted
 
     steps:
     - uses: actions/checkout@v4
 
-
-    # ============================
-    #        TRIVY SETUP
-    # ============================
+    # ---- TRIVY ----
     - name: Install Trivy (Caching Enabled)
       run: |
         if ! command -v trivy &> /dev/null; then
@@ -49,10 +52,7 @@ jobs:
     - name: Trivy FS Scan (Fast)
       run: trivy fs --scanners vuln,secret --format json -o fs-report.json .
 
-
-    # ============================
-    #        GITLEAKS SETUP
-    # ============================
+    # ---- GITLEAKS ----
     - name: Install GitLeaks (Caching Enabled)
       run: |
         if ! command -v gitleaks &> /dev/null; then
@@ -75,17 +75,23 @@ jobs:
     - name: GitLeaks Code Scan
       run: gitleaks detect -r gitleaks-report.json -f json
 
-  test: 
-     runs-on: self-hosted
 
-     steps: 
-     - uses: action/checkout@v4
-     - name: Set up JDK 17
-       uses: action/setup-java@v4
-       with: 
-         java-version: '17'
-         distribution: 'temurin'
-         cache: maven
-     - name: Unit Test Cases
-       run: mvn test
-      
+
+  # =====================
+  #  TEST JOB (YOUR ISSUE FIXED)
+  # =====================
+  test:
+    runs-on: self-hosted
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Run Tests
+      run: mvn test
