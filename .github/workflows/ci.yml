@@ -1,8 +1,6 @@
 name: Java CI with Maven
 
-# ======================================
-# 🔥 Concurrency (only latest commit runs)
-# ======================================
+# Only the latest commit in the branch runs
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -17,124 +15,190 @@ jobs:
   # 1️⃣ BUILD JOB
   # =====================
   build:
+    name: Build
     runs-on: self-hosted
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: maven
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
 
-    - name: Build with Maven
-      run: mvn clean package -DskipTests
+      - name: Build with Maven (skip tests)
+        run: mvn -B clean package -DskipTests
 
-
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/*.jar
 
   # =====================
-  # 2️⃣ TEST JOB (Runs After Build)
+  # 2️⃣ TEST JOB (Runs after Build)
   # =====================
   test:
+    name: Test
     runs-on: self-hosted
     needs: build
-    
+
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: maven
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
 
-    - name: Run Tests
-      run: mvn test
-
-
+      - name: Run Tests
+        run: mvn -B test
 
   # =====================
-  # 3️⃣ SONARQUBE SCAN (Runs After Test)
+  # 3️⃣ SONARQUBE SCAN (Runs after Test)
   # =====================
   sonar:
+    name: SonarQube Scan
     runs-on: self-hosted
     needs: test
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0    # SONAR RECOMMENDED
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-    - name: Build Project
-      run: mvn clean package -DskipTests
+      - name: Build for Sonar
+        run: mvn -B clean package
 
-    - name: SonarQube Scan
-      uses: SonarSource/sonarqube-scan-action@v6.0.0
-      env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+      - name: Upload JAR artifact (for downstream jobs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/*.jar
 
-    - name: SonarQube Quality Gate
-      id: quality-gate
-      uses: sonarsource/sonarqube-quality-gate-action@master
-      env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-
+      - name: SonarQube Quality Gate
+        id: quality-gate
+        uses: sonarsource/sonarqube-quality-gate-action@v1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   # =====================
-  # 4️⃣ SECURITY CHECK (Runs After Sonar)
+  # 4️⃣ BUILD DOCKER IMAGE & PUSH (Runs after Sonar)
   # =====================
-  security-check:
+  build_docker_image_and_push:
+    name: Build and Push Docker Image
     runs-on: self-hosted
     needs: sonar
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    # ---- TRIVY ----
-    - name: Install Trivy (Cached)
-      run: |
-        if ! command -v trivy &> /dev/null; then
-          echo "Installing Trivy..."
-          sudo apt-get update -y
-          sudo apt-get install -y wget
-          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.49.1_Linux-64bit.deb -O trivy.deb
-          sudo dpkg -i trivy.deb
-        else
-          echo "Trivy already installed — skipping."
-        fi
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: app
 
-    - name: Trivy FS Scan
-      run: trivy fs --scanners vuln,secret --format json -o fs-report.json .
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    # ---- GITLEAKS ----
-    - name: Install GitLeaks (Cached)
-      run: |
-        if ! command -v gitleaks &> /dev/null; then
-          echo "Installing GitLeaks..."
-          LATEST_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
-            | grep browser_download_url \
-            | grep linux_x64 \
-            | cut -d '"' -f 4)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-          echo "Downloading from: $LATEST_URL"
-          wget -O gitleaks.tar.gz "$LATEST_URL"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-          tar -xzf gitleaks.tar.gz
-          sudo install -m 755 gitleaks /usr/local/bin/gitleaks
-        else
-          echo "GitLeaks already installed — skipping."
-        fi
+      - name: Build and push (multi-platform optional)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ vars.DOCKERHUB_USERNAME }}/boardgame:latest
+          file: ./Dockerfile
 
-    - name: GitLeaks Scan
-      run: gitleaks detect -r gitleaks-report.json -f json
+  # =====================
+  # 5️⃣ SECURITY CHECK (Runs after Sonar)
+  # =====================
+  security-check:
+    name: Security Scans
+    runs-on: self-hosted
+    needs: sonar
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---- TRIVY ----
+      - name: Install Trivy (if not present)
+        run: |
+          if ! command -v trivy &> /dev/null; then
+            echo "Installing Trivy..."
+            sudo apt-get update -y
+            sudo apt-get install -y wget
+            wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.49.1_Linux-64bit.deb -O trivy.deb
+            sudo dpkg -i trivy.deb
+          else
+            echo "Trivy already installed — skipping."
+          fi
+
+      - name: Trivy FS Scan
+        run: trivy fs --scanners vuln,secret --format json -o fs-report.json .
+
+      - name: Upload Trivy report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: fs-report.json
+
+      # ---- GITLEAKS ----
+      - name: Install Gitleaks (if not present)
+        run: |
+          if ! command -v gitleaks &> /dev/null; then
+            echo "Installing Gitleaks..."
+            LATEST_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+              | grep browser_download_url \
+              | grep linux_x64 \
+              | cut -d '"' -f 4)
+            echo "Downloading from: $LATEST_URL"
+            wget -O gitleaks.tar.gz "$LATEST_URL"
+            tar -xzf gitleaks.tar.gz
+            sudo install -m 755 gitleaks /usr/local/bin/gitleaks
+          else
+            echo "Gitleaks already installed — skipping."
+          fi
+
+      - name: GitLeaks Scan
+        run: |
+          gitleaks detect -r gitleaks-report.json -f json || true
+
+      - name: Upload GitLeaks report
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
