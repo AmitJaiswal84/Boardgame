@@ -14,10 +14,10 @@ on:
 jobs:
 
   # =====================
-  # 1️⃣ BUILD JOB
+  # 1️⃣ BUILD & DEPLOY TO NEXUS
   # =====================
   build:
-    name: Build
+    name: Build & Deploy to Nexus
     runs-on: self-hosted
 
     steps:
@@ -30,9 +30,30 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
+          server-id: nexus
+          server-username: NEXUS_USERNAME
+          server-password: NEXUS_PASSWORD
 
-      - name: Build with Maven (skip tests)
-        run: mvn -B clean package -DskipTests
+      - name: Create Maven settings.xml for Nexus
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<EOF
+          <settings>
+            <servers>
+              <server>
+                <id>nexus</id>
+                <username>${{ secrets.NEXUS_USERNAME }}</username>
+                <password>${{ secrets.NEXUS_PASSWORD }}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+
+      - name: Build & Deploy to Nexus
+        run: |
+          mvn -B clean deploy -DskipTests \
+            -Dnexus.release.url=${{ secrets.NEXUS_RELEASE_URL }} \
+            -Dnexus.snapshot.url=${{ secrets.NEXUS_SNAPSHOT_URL }}
 
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
@@ -78,7 +99,7 @@ jobs:
       SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
     steps:
-      - name: Checkout (full history)
+      - name: Checkout full history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -99,7 +120,6 @@ jobs:
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
       - name: SonarQube Quality Gate
-        id: quality-gate
         uses: sonarsource/sonarqube-quality-gate-action@v1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -109,7 +129,7 @@ jobs:
   # =============================
   # 4️⃣ BUILD + PUSH DOCKER IMAGE
   # =============================
-  build_docker_image_and_push:
+  docker_build_push:
     name: Build and Push Docker Image
     runs-on: self-hosted
     needs: sonar
@@ -136,7 +156,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and Push Image
+      - name: Build & Push Docker Image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -166,8 +186,6 @@ jobs:
             sudo apt-get install -y wget
             wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.49.1_Linux-64bit.deb -O trivy.deb
             sudo dpkg -i trivy.deb
-          else
-            echo "Trivy already installed"
           fi
 
       - name: Trivy FS Scan
@@ -188,13 +206,10 @@ jobs:
             wget -O gitleaks.tar.gz "$LATEST_URL"
             tar -xzf gitleaks.tar.gz
             sudo install -m 755 gitleaks /usr/local/bin/gitleaks
-          else
-            echo "GitLeaks already installed"
           fi
 
       - name: GitLeaks Scan
-        run: |
-          gitleaks detect -r gitleaks-report.json -f json || true
+        run: gitleaks detect -r gitleaks-report.json -f json || true
 
       - name: Upload GitLeaks Report
         uses: actions/upload-artifact@v4
