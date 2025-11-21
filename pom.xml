@@ -147,6 +147,16 @@
     ==================================================== -->
     <distributionManagement>
 
+        <!-- For the Jenkins -->
+              <!-- <repository>
+                <id>maven-releases</id> 
+                <url>http://192.168.90.2:8081/repository/maven-releases/</url>
+             </repository> 
+             <snapshotRepository> 
+             <id>maven-snapshots</id> 
+             <url>http://192.168.90.2:8081/repository/maven-snapshots/</url> 
+             </snapshotRepository>       -->
+
         <!-- Deploy Release Versions -->
         <repository>
             <id>nexus-releases</id>
